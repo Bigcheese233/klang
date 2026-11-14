@@ -861,7 +861,8 @@ public sealed partial class MainWindow : Window
             foreach (var t in new[] { a, next })
             {
                 if (t.RhythmDone) continue;
-                var res = await System.Threading.Tasks.Task.Run(() => { try { return RhythmAnalysisService.Analyze(t.FilePath, t.Duration); } catch { return null; } });
+                RhythmResult? res = null;
+                try { res = await AnalysisWorker.Instance.RhythmAsync(t.FilePath, t.Duration); } catch { }
                 RhythmAnalysisService.Apply(t, res);
             }
             if (_currentTrack != a || !engine.IsPlaying) return;

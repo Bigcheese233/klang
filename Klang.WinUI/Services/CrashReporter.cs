@@ -142,6 +142,18 @@ public static class CrashReporter
         App.LogError("Crash (previous session)", sb.ToString().TrimEnd());
     }
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")] private static extern uint GetOEMCP();
+
+    private static Encoding OemEncoding()
+    {
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding((int)GetOEMCP());
+        }
+        catch { return Encoding.UTF8; }
+    }
+
     /// <summary>用系统自带的 wevtutil 查询“应用程序”日志：1000 崩溃、1002 无响应、1026 .NET 运行时错误。</summary>
     private static List<string> QueryEvents(DateTime sinceUtc)
     {
@@ -155,7 +167,8 @@ public static class CrashReporter
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
-                StandardOutputEncoding = Encoding.UTF8,
+                // wevtutil 按系统的 OEM 代码页输出（中文系统是 GBK / 936），按 UTF-8 读会把中文说明读成乱码
+                StandardOutputEncoding = OemEncoding(),
             };
             foreach (var a in new[] { "qe", "Application", "/q:" + query, "/f:text", "/c:500", "/rd:true" })
                 psi.ArgumentList.Add(a);

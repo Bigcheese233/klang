@@ -46,6 +46,7 @@ public static class WaveformService
         try
         {
             ct.ThrowIfCancellationRequested();
+            CrashReporter.Note("波形：" + Path.GetFileName(path));
             var data = await Task.Run(() => Compute(path, start, end, ct), ct);
             if (data == null) return null;
             Remember(key, data);

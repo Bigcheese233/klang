@@ -51,12 +51,14 @@ public sealed class AudioFeatureService
         {
             try
             {
+                await Task.Delay(1500);   // 导入刚完成时三项分析错开启动
                 int sinceSave = 0;
                 while (_queue.TryDequeue(out var t))
                 {
                     try
                     {
-                        var feat = Extract(t.FilePath, t.Duration);
+                        // 在独立的分析进程里解码：万一解码器在原生层崩溃，只结束那个进程
+                        var feat = await AnalysisWorker.Instance.FeaturesAsync(t.FilePath, t.Duration);
                         if (feat != null)
                         {
                             t.AudioFeat = feat;

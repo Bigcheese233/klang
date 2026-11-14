@@ -59,12 +59,13 @@ public sealed class QualityAnalysisService
         {
             try
             {
+                await Task.Delay(3000);   // 导入刚完成时三项分析错开启动
                 int sinceSave = 0;
                 while (_queue.TryDequeue(out var t))
                 {
                     try
                     {
-                        var r = Analyze(t.FilePath, t.Duration, t.BitDepth);
+                        var r = await AnalysisWorker.Instance.QualityAsync(t.FilePath, t.Duration, t.BitDepth);
                         if (r != null)
                         {
                             _ui?.SafeEnqueue(() =>

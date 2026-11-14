@@ -41,7 +41,7 @@ public static class QualityDialog
     {
         AuthResult? r = null;
         string? error = null;
-        try { r = await Task.Run(() => QualityAnalysisService.Analyze(track.FilePath, track.Duration, track.BitDepth)); }
+        try { r = await AnalysisWorker.Instance.QualityAsync(track.FilePath, track.Duration, track.BitDepth); }
         catch (Exception ex) { error = ex.Message; }
 
         holder.Children.Clear();

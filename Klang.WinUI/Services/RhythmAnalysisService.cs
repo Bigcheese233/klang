@@ -67,13 +67,14 @@ public sealed class RhythmAnalysisService
         {
             try
             {
+                await Task.Delay(4500);   // 导入刚完成时三项分析错开启动
                 int sinceSave = 0;
                 while (_queue.TryDequeue(out var t))
                 {
                     try
                     {
                         RhythmResult? r = null;
-                        try { r = Analyze(t.FilePath, t.Duration); } catch { }
+                        try { r = await AnalysisWorker.Instance.RhythmAsync(t.FilePath, t.Duration); } catch { }
                         _ui?.SafeEnqueue(() =>
                         {
                             Apply(t, r);
