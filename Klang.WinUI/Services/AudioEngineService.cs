@@ -75,6 +75,7 @@ public class AudioEngineService : IDisposable
 
     public void InitializeDispatcher(DispatcherQueue dispatcherQueue)
     {
+        WatchDevices(dispatcherQueue);
         _positionTimer = dispatcherQueue.CreateTimer();
         _positionTimer.Interval = TimeSpan.FromMilliseconds(40); // 25fps 丝滑状态刷新
         _positionTimer.Tick += (s, e) =>
@@ -140,13 +141,14 @@ public class AudioEngineService : IDisposable
     private string? _filePath;
 
     /// <summary>输出设备 / 独占模式改了之后，在当前位置无缝重开输出（保持播放或暂停状态）。</summary>
-    public void ReopenOutput()
+    public void ReopenOutput() => ReopenOutput(IsPlaying);
+
+    private void ReopenOutput(bool wasPlaying)
     {
         if (_audioFileReader == null || string.IsNullOrEmpty(_filePath)) return;
         CrashReporter.Note($"重开音频输出（设备 {StateService.Instance.State.SelectedDeviceId}，独占 {StateService.Instance.State.WasapiExclusive}）");
         string path = _filePath;
         double start = _segStart, end = _segEnd, pos = CurrentTime;
-        bool wasPlaying = IsPlaying;
         Play(path, start, end);
         if (!HasSource) return;
         if (pos > 0.05) Seek(pos);
@@ -251,15 +253,17 @@ public class AudioEngineService : IDisposable
         return 0;
     }
 
-    /// <summary>取消还没开始的混音（用户跳转、切歌时）。</summary>
-    public void CancelMix()
+    /// <summary>取消还没开始的混音（用户跳转、切歌时）。已经开始淡入淡出的取消不了，返回 false。</summary>
+    public bool CancelMix()
     {
         if (_xfade?.CancelScheduled() == true)
         {
             try { _pendingNextReader?.Dispose(); } catch { }
             _pendingNextReader = null; _pendingNextStretch = null; _pendingNextPath = null;
             _mixGainRamp = false;
+            return true;
         }
+        return false;
     }
 
     private void ClearMix()
@@ -416,6 +420,7 @@ public class AudioEngineService : IDisposable
     {
         ReleaseOutputDevice();
         var device = _outputDevice = GetOutputDevice();
+        _outputDeviceId = device?.ID;
         string? fallback = null;
 
         if (ExclusiveMode)
@@ -740,6 +745,70 @@ public class AudioEngineService : IDisposable
         {
             TrackEnded?.Invoke();
         }
+        else if (e.Exception != null && _audioFileReader != null)
+        {
+            // 输出设备被拔掉 / 失效：等系统切好默认设备后，在原位置接着播
+            CrashReporter.Note("音频输出中断：" + e.Exception.Message);
+            _resumeAfterDeviceLoss = true;
+            ScheduleDeviceCheck();
+        }
+    }
+
+    // ---------------- 跟随系统输出设备的变化 ----------------
+
+    private string? _outputDeviceId;            // 当前输出实际用的设备
+    private bool _resumeAfterDeviceLoss;        // 播放中设备失效，重开后要继续播放
+    private MMDeviceEnumerator? _deviceWatcher;
+    private MMDeviceNotificationClient? _deviceNotifier;
+    private DispatcherQueueTimer? _deviceCheckTimer;
+
+    /// <summary>
+    /// 监听系统音频设备：输出设为“系统默认”时，在 Windows 里换了默认设备，当前这首立即换到新设备；
+    /// 正在用的设备被拔掉时，改用默认设备接着播；选定的设备重新插上时换回去。
+    /// </summary>
+    private void WatchDevices(DispatcherQueue dq)
+    {
+        if (_deviceWatcher != null) return;
+        try
+        {
+            _deviceCheckTimer = dq.CreateTimer();
+            _deviceCheckTimer.Interval = TimeSpan.FromMilliseconds(400);   // 系统切换时会连续发几条通知，合并成一次
+            _deviceCheckTimer.IsRepeating = false;
+            _deviceCheckTimer.Tick += (s, e) => CheckOutputDevice();
+            _deviceWatcher = new MMDeviceEnumerator();
+            // 通知在系统音频线程上到达，那里不能阻塞，只转交给界面线程
+            _deviceNotifier = _deviceWatcher.CreateNotificationClient(false);
+            void Changed() => dq.TryEnqueue(ScheduleDeviceCheck);
+            _deviceNotifier.DefaultDeviceChanged += (s, e) => { if (e.Flow == DataFlow.Render && e.Role == Role.Multimedia) Changed(); };
+            _deviceNotifier.DeviceStateChanged += (s, e) => Changed();
+            _deviceNotifier.DeviceRemoved += (s, e) => Changed();
+        }
+        catch (Exception ex)
+        {
+            App.LogError("Audio device watch", ex.Message);
+        }
+    }
+
+    private void ScheduleDeviceCheck()
+    {
+        if (_deviceCheckTimer == null) return;
+        _deviceCheckTimer.Stop();
+        _deviceCheckTimer.Start();
+    }
+
+    private void CheckOutputDevice()
+    {
+        bool resume = _resumeAfterDeviceLoss;
+        _resumeAfterDeviceLoss = false;
+        if (!HasSource) return;
+
+        string? want;
+        using (var d = GetOutputDevice()) want = d?.ID;
+        if (want == null) return;   // 一个可用的输出设备都没有：等下一条通知
+        if (!resume && string.Equals(want, _outputDeviceId, StringComparison.OrdinalIgnoreCase)) return;
+
+        CrashReporter.Note("输出设备变化，切换到新设备");
+        ReopenOutput(resume || IsPlaying);
     }
 
     #region 设置持久化

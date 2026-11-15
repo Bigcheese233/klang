@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window
         ((FrameworkElement)Content).ActualThemeChanged += (s, e) => UpdateRail(_railTab);
         StageLyricsControl.CalibrationPicked += StageLyricsControl_CalibrationPicked;
         ImmersiveLayer.CloseRequested += (s, e) => CloseImmersive();
+        Activated += (s, e) => { if (e.WindowActivationState == WindowActivationState.Deactivated) ImmersiveLayer.OnWindowDeactivated(); };
         ImmersiveLayer.SeekRequested += (s, t) => AudioEngineService.Instance.Seek(Math.Max(0, t - _lyricOffset));
         ImmersiveLayer.VolumeChanged += (s, v) => BottomTransportBar.SetVolume(v);
         ImmersiveLayer.SetVolume(AudioEngineService.Instance.Volume);
@@ -272,6 +273,13 @@ public sealed partial class MainWindow : Window
             if (_currentTrack != null) ToggleFavorite(_currentTrack, fromTransport: true);
         };
 
+        BottomTransportBar.QueueClicked += (s, anchor) =>
+            QueueFlyout.Show(anchor, () => LeftNavPane.Queue, LeftNavPane.UpNext, _currentTrack,
+                play: t => { _preChosenNext = null; PlayTrack(t); },
+                playNext: LeftNavPane.PlayNextInQueue,
+                remove: LeftNavPane.RemoveFromQueue);
+        LeftNavPane.UpNextChanged += (s, e) => OnUpNextChanged();
+
         BottomTransportBar.EqualizerClicked += async (s, e) =>
         {
             await OpenEqualizerDialogAsync();
@@ -392,6 +400,22 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// “下一首播放” / 队列变了：之前预先选好的下一首作废，快放完时按新的顺序重新选（并重新预缓冲、规划混音）。
+    /// 已经排好但还没开始的混音一并取消；已经在淡入淡出的就让它播完。
+    /// </summary>
+    private void OnUpNextChanged()
+    {
+        if (_mixNext != null)
+        {
+            if (!AudioEngineService.Instance.CancelMix()) return;
+            _mixNext = null; _mixPlan = null;
+        }
+        _preChosenNext = null;
+        _prefetchFromId = null;
+        _plannedFromId = null;
+    }
+
     private void SavePlayMode()
     {
         State.PlayMode = _playMode;
@@ -494,6 +518,7 @@ public sealed partial class MainWindow : Window
 
         if (!_adoptingMix) { _mixNext = null; _preChosenNext = null; }
         _prefetchFromId = null;   // 新的一首：允许再次为它的下一首预缓冲
+        if (autoPlay) LeftNavPane.UpNext.Remove(track);   // 已经播到了，不再算“下一首播放”
         if (_currentTrack != null) _currentTrack.IsCurrent = false;
         _currentTrack = track;
         track.IsCurrent = true;
@@ -723,6 +748,11 @@ public sealed partial class MainWindow : Window
     private TrackItem? PickNextTrack(out string? reason, out bool byRoam)
     {
         reason = null; byRoam = false;
+
+        // “下一首播放”点过的歌优先，不受随机 / 漫游模式影响
+        foreach (var up in LeftNavPane.UpNext)
+            if (up != _currentTrack && (!up.IsMissing || up.IsOnline)) return up;
+
         var tracks = LeftNavPane.Queue;
         if (tracks.Count == 0) return null;
 

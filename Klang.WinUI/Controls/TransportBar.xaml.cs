@@ -21,6 +21,8 @@ public sealed partial class TransportBar : UserControl
     public event EventHandler? EqualizerClicked;
     public event EventHandler? RateClicked;
     public event EventHandler? FavoriteClicked;
+    /// <summary>点了“播放队列”按钮，参数是按钮本身（弹出层的锚点）。</summary>
+    public event EventHandler<FrameworkElement>? QueueClicked;
     public event EventHandler<double>? UserSeekRequested;
     public event EventHandler<float>? UserVolumeChanged;
 
@@ -34,6 +36,15 @@ public sealed partial class TransportBar : UserControl
     public TransportBar()
     {
         InitializeComponent();
+
+        // 窗口较窄时：均衡器只留图标、隐藏音量百分比，右侧收窄，中间的播放按钮不被挤掉
+        SizeChanged += (s, e) =>
+        {
+            bool narrow = e.NewSize.Width < 1060;
+            EqBadgeText.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
+            VolumePctText.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
+            RightColumn.Width = new GridLength(narrow ? 252 : 332);
+        };
         ActualThemeChanged += (s, e) => RefreshIconColors();
         Loaded += (s, e) => RefreshIconColors();
 
@@ -295,6 +306,8 @@ public sealed partial class TransportBar : UserControl
     }
     private void RateBtn_Click(object sender, RoutedEventArgs e) => RateClicked?.Invoke(this, EventArgs.Empty);
     private void EqBtn_Click(object sender, RoutedEventArgs e) => EqualizerClicked?.Invoke(this, EventArgs.Empty);
+
+    private void QueueBtn_Click(object sender, RoutedEventArgs e) => QueueClicked?.Invoke(this, QueueBtn);
 
     private void FavoriteBtn_Click(object sender, RoutedEventArgs e)
     {

@@ -47,7 +47,49 @@ public sealed partial class ImmersiveView : UserControl
         }), true);
 
         Dock.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(300) };
-        PointerMoved += (s, e) => { if (IsOpen) WakeDock(); };
+        PointerMoved += (s, e) =>
+        {
+            if (!IsOpen) return;
+            // 控制条淡出、元素重新布局时也可能收到 PointerMoved：鼠标真的动了才唤醒
+            var p = e.GetCurrentPoint(this).Position;
+            if (_cursorHidden && Math.Abs(p.X - _lastPointer.X) < 2 && Math.Abs(p.Y - _lastPointer.Y) < 2) return;
+            _lastPointer = p;
+            WakeDock();
+        };
+        PointerExited += (s, e) => ShowPointer();
+    }
+
+    // ---------------- 静止时隐藏鼠标指针 ----------------
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern int ShowCursor(bool show);
+
+    private bool _cursorHidden;
+    private Windows.Foundation.Point _lastPointer;
+
+    /// <summary>
+    /// 隐藏 / 恢复鼠标指针。ShowCursor 是计数式的（每次隐藏都要对应一次显示），
+    /// 所以只在状态真正变化时各调一次，保证退出沉浸模式后指针一定回来。
+    /// </summary>
+    private void HidePointer()
+    {
+        if (_cursorHidden) return;
+        _cursorHidden = true;
+        ShowCursor(false);
+    }
+
+    private void ShowPointer()
+    {
+        if (!_cursorHidden) return;
+        _cursorHidden = false;
+        ShowCursor(true);
+    }
+
+    /// <summary>窗口失去焦点（切到别的程序）时恢复指针。</summary>
+    public void OnWindowDeactivated()
+    {
+        if (!IsOpen) return;
+        ShowPointer();
+        WakeDock();
     }
 
     public bool IsOpen => Visibility == Visibility.Visible;
@@ -68,6 +110,7 @@ public sealed partial class ImmersiveView : UserControl
     {
         Visibility = Visibility.Collapsed;
         _idleTimer?.Stop();
+        ShowPointer();
         Fluid.Stop();
     }
 
@@ -125,6 +168,7 @@ public sealed partial class ImmersiveView : UserControl
     /// <summary>鼠标移动时显示控制条，静止 3 秒后淡出。</summary>
     private void WakeDock()
     {
+        ShowPointer();
         Dock.Opacity = 1;
         Dock.IsHitTestVisible = true;
         _idleTimer ??= DispatcherQueue.CreateTimer();
@@ -140,6 +184,26 @@ public sealed partial class ImmersiveView : UserControl
         if (_dragging) { WakeDock(); return; }
         Dock.Opacity = 0;
         Dock.IsHitTestVisible = false;
+        // 只在鼠标停在沉浸界面上、且窗口在前台时隐藏指针
+        if (IsOpen && XamlRoot?.IsHostVisible == true && IsPointerOverSelf()) HidePointer();
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT p);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr h, uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    private struct POINT { public int X, Y; }
+
+    private bool IsPointerOverSelf()
+    {
+        try
+        {
+            if (!GetCursorPos(out var p)) return false;
+            var top = GetAncestor(WindowFromPoint(p), 2 /* GA_ROOT */);
+            return top != IntPtr.Zero && top == GetForegroundWindow()
+                && top == WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
+        }
+        catch { return false; }
     }
 
     #endregion

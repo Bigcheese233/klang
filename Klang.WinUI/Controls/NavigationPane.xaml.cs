@@ -221,8 +221,6 @@ public sealed partial class NavigationPane : UserControl
         if (DisplayTracks.Count > 0) Queue = DisplayTracks.ToList();
     }
 
-    public void RemoveFromQueue(TrackItem track) => Queue.Remove(track);
-
     /// <summary>把队列重置为整个曲库（曲库被设置页改动后使用）。</summary>
     public void ResetQueue() => Queue = LibraryService.Instance.Tracks.ToList();
 
@@ -845,6 +843,7 @@ public sealed partial class NavigationPane : UserControl
         {
             LibraryService.Instance.RemoveTrack(track);
             Queue.Remove(track);
+            UpNext.Remove(track);
             TrackRemoved?.Invoke(this, track);
             RefreshView();
         };
@@ -1077,20 +1076,44 @@ public sealed partial class NavigationPane : UserControl
     #region 播放队列
 
     /// <summary>下一首播放：插到当前曲目后面。</summary>
-    private void PlayNextInQueue(TrackItem track)
+    /// <summary>
+    /// “下一首播放”点过、还没播到的歌（最近点的在最前）。不管是顺序、随机还是漫游模式，下一首都先从这里取。
+    /// </summary>
+    public List<TrackItem> UpNext { get; } = new();
+
+    /// <summary>“下一首播放”或播放队列有变化：之前预先选好的下一首需要作废。</summary>
+    public event EventHandler? UpNextChanged;
+
+    /// <summary>下一首播放：插到队列里当前这首后面，并记入 <see cref="UpNext"/>，随机 / 漫游模式下也保证接着播它。</summary>
+    public void PlayNextInQueue(TrackItem track)
     {
+        if (track == _currentTrack) return;
         EnsureQueueHasCurrent();
         Queue.Remove(track);
         int idx = _currentTrack != null ? Queue.IndexOf(_currentTrack) : -1;
         Queue.Insert(Math.Min(idx + 1, Queue.Count), track);
+        UpNext.Remove(track);
+        UpNext.Insert(0, track);
+        UpNextChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>加入队列：放到队尾。</summary>
-    private void AddToQueueEnd(TrackItem track)
+    public void AddToQueueEnd(TrackItem track)
     {
         EnsureQueueHasCurrent();
         Queue.Remove(track);
         Queue.Add(track);
+        UpNext.Remove(track);
+        UpNextChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>从播放队列移除（不影响曲库）。</summary>
+    public void RemoveFromQueue(TrackItem track)
+    {
+        if (track == _currentTrack) return;
+        Queue.Remove(track);
+        UpNext.Remove(track);
+        UpNextChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void EnsureQueueHasCurrent()
