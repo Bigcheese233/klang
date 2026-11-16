@@ -105,6 +105,9 @@ public class AppState
     public int DesktopLyricFontSize { get; set; } = 30;
     public int? MiniX { get; set; }
     public int? MiniY { get; set; }
+    public bool TaskbarPlayerEnabled { get; set; }
+    public string TaskbarPlayerMonitor { get; set; } = "";
+    public string TaskbarPlayerSide { get; set; } = "right";    // 停靠在任务栏哪一侧：left | right
 
     public bool AutoFetchMetadata { get; set; } = true;     // 本地歌曲缺封面/信息/歌词时在线补全
     public string LyricSubMode { get; set; } = "trans";   // trans | roma | both | off
